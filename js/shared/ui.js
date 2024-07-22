@@ -10,7 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
-const toggleLoadingButton = (button) => {
+// eslint-disable-next-line import/prefer-default-export
+export const toggleLoadingButton = (button) => {
   let circle = button.querySelector('sp-progress-circle');
   if (circle) {
     circle.remove();
@@ -21,9 +22,4 @@ const toggleLoadingButton = (button) => {
 
     button.prepend(circle);
   }
-};
-
-export {
-  // eslint-disable-next-line import/prefer-default-export
-  toggleLoadingButton,
 };

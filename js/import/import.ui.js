@@ -16,6 +16,7 @@ import { asyncForEach } from '../shared/utils.js';
 import PollImporter from '../shared/pollimporter.js';
 import alert from '../shared/alert.js';
 import { toggleLoadingButton } from '../shared/ui.js';
+import { createJcrPackage } from '../shared/jcr.js';
 
 const PARENT_SELECTOR = '.import';
 const CONFIG_PARENT_SELECTOR = `${PARENT_SELECTOR} form`;
@@ -31,10 +32,12 @@ const FOLDERNAME_SPAN = document.getElementById('folder-name');
 const TRANSFORMED_HTML_TEXTAREA = document.getElementById('import-transformed-html');
 const MD_SOURCE_TEXTAREA = document.getElementById('import-markdown-source');
 const MD_PREVIEW_PANEL = document.getElementById('import-markdown-preview');
+const JCR_PANEL = document.getElementById('import-jcr');
 
 const SPTABS = document.querySelector(`${PARENT_SELECTOR} sp-tabs`);
 
 const DOWNLOAD_IMPORT_REPORT_BUTTON = document.getElementById('import-downloadImportReport');
+const SAVE_JCR_CHECKBOX = document.getElementById('import-local-jcr');
 
 const IS_BULK = document.querySelector('.import-bulk') !== null;
 const BULK_URLS_HEADING = document.querySelector('#import-result h2');
@@ -50,6 +53,9 @@ const importStatus = {};
 
 let isSaveLocal = false;
 let dirHandle = null;
+let jcrPages = [];
+
+const getContentFrame = () => document.querySelector(`${PARENT_SELECTOR} iframe`);
 
 const setupUI = () => {
   ui.transformedEditor = CodeMirror.fromTextArea(TRANSFORMED_HTML_TEXTAREA, {
@@ -58,6 +64,13 @@ const setupUI = () => {
     theme: 'base16-dark',
   });
   ui.transformedEditor.setSize('100%', '100%');
+
+  ui.jcrEditor = CodeMirror.fromTextArea(JCR_PANEL, {
+    lineNumbers: true,
+    mode: 'htmlmixed',
+    theme: 'base16-dark',
+  });
+  ui.jcrEditor.setSize('100%', '100%');
 
   ui.markdownEditor = CodeMirror.fromTextArea(MD_SOURCE_TEXTAREA, {
     lineNumbers: true,
@@ -73,9 +86,19 @@ const setupUI = () => {
   SPTABS.selected = 'import-preview';
 };
 
-const loadResult = ({ md, html: outputHTML }) => {
+const loadResult = ({
+  md,
+  html: outputHTML,
+  jcr,
+}) => {
   if (outputHTML) {
     ui.transformedEditor.setValue(html_beautify(outputHTML.replaceAll(/\s+/g, ' '), {
+      indent_size: '2',
+    }));
+  }
+
+  if (jcr) {
+    ui.jcrEditor.setValue(html_beautify(jcr.replaceAll(/\s+/g, ' '), {
       indent_size: '2',
     }));
   }
@@ -224,14 +247,14 @@ const getProxyURLSetup = (url, origin) => {
 const postSuccessfulStep = async (results, originalURL) => {
   let error = false;
   await asyncForEach(results, async ({
-    docx, html, md, filename, path, report, from,
+    docx, html, md, jcr, filename, path, report, from,
   }) => {
     const data = {
       url: originalURL,
       path,
     };
 
-    if (isSaveLocal && dirHandle && (docx || html || md)) {
+    if (isSaveLocal && dirHandle && (docx || html || md || jcr)) {
       const files = [];
       if (config.fields['import-local-docx'] && docx) {
         files.push({ type: 'docx', filename, data: docx });
@@ -239,6 +262,13 @@ const postSuccessfulStep = async (results, originalURL) => {
         files.push({ type: 'html', filename: `${path}.html`, data: `<html><head></head>${html}</html>` });
       } else if (config.fields['import-local-md'] && md) {
         files.push({ type: 'md', filename: `${path}.md`, data: md });
+      } else if (config.fields['import-local-jcr'] && jcr) {
+        jcrPages.push({
+          type: 'jcr',
+          path,
+          data: jcr,
+          url: originalURL,
+        });
       }
 
       files.forEach((file) => {
@@ -372,10 +402,9 @@ const createImporter = () => {
     origin: config.origin,
     poll: !IS_BULK,
     importFileURL: config.fields['import-file-url'],
+    siteName: config.fields['site-name'],
   });
 };
-
-const getContentFrame = () => document.querySelector(`${PARENT_SELECTOR} iframe`);
 
 const sleep = (ms) => new Promise(
   (resolve) => {
@@ -393,6 +422,18 @@ const smartScroll = async (window) => {
     maxLoops -= 1;
     // eslint-disable-next-line no-await-in-loop
     await sleep(250);
+  }
+};
+
+const displaySiteNameConfig = (show) => {
+  const siteName = document.getElementById('site-name');
+  const siteNameLabel = document.getElementById('site-name-label');
+  if (show) {
+    siteName.classList.remove('hidden');
+    siteNameLabel.classList.remove('hidden');
+  } else {
+    siteName.classList.add('hidden');
+    siteNameLabel.classList.add('hidden');
   }
 };
 
@@ -433,6 +474,7 @@ const attachListeners = () => {
 
   IMPORT_BUTTON.addEventListener('click', (async () => {
     initImportStatus();
+    jcrPages = [];
 
     if (IS_BULK) {
       clearResultPanel();
@@ -449,7 +491,7 @@ const attachListeners = () => {
 
     disableProcessButtons();
     toggleLoadingButton(IMPORT_BUTTON);
-    isSaveLocal = config.fields['import-local-docx'] || config.fields['import-local-html'] || config.fields['import-local-md'];
+    isSaveLocal = config.fields['import-local-docx'] || config.fields['import-local-html'] || config.fields['import-local-md'] || config.fields['import-local-jcr'];
     if (isSaveLocal && !dirHandle) {
       try {
         dirHandle = await getDirectoryHandle();
@@ -518,6 +560,7 @@ const attachListeners = () => {
 
               const onLoad = async () => {
                 const includeDocx = !!dirHandle && config.fields['import-local-docx'];
+                const createJCR = !!dirHandle && config.fields['import-local-jcr'];
 
                 if (config.fields['import-scroll-to-bottom']) {
                   await smartScroll(frame.contentWindow.window);
@@ -544,6 +587,7 @@ const attachListeners = () => {
                       document: frame.contentDocument,
                       includeDocx,
                       params: { originalURL },
+                      createJCR,
                     });
                     await config.importer.transform();
                   }
@@ -600,6 +644,8 @@ const attachListeners = () => {
       } else {
         const frame = getContentFrame();
         frame.removeEventListener('transformation-complete', processNext);
+        const siteName = config.fields['site-name'];
+        await createJcrPackage(dirHandle, jcrPages, siteName);
         DOWNLOAD_IMPORT_REPORT_BUTTON.classList.remove('hidden');
         enableProcessButtons();
         toggleLoadingButton(IMPORT_BUTTON);
@@ -623,12 +669,17 @@ const attachListeners = () => {
     a.click();
   }));
 
+  SAVE_JCR_CHECKBOX.addEventListener('click', (event) => {
+    displaySiteNameConfig(!event.target.checked);
+  });
+
   if (SPTABS) {
     SPTABS.addEventListener('change', () => {
       // required for code to load in editors
       setTimeout(() => {
         ui.transformedEditor.refresh();
         ui.markdownEditor.refresh();
+        ui.jcrEditor.refresh();
       }, 1);
     });
   }
@@ -639,6 +690,8 @@ const init = () => {
   config.fields = initOptionFields(CONFIG_PARENT_SELECTOR);
 
   createImporter();
+
+  displaySiteNameConfig(SAVE_JCR_CHECKBOX.checked);
 
   if (!IS_BULK) setupUI();
   attachListeners();

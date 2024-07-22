@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 /* global WebImporter */
+import { loadComponents } from './jcr.js';
 
 const DEFAULT_SUPPORTED_STYLES = [{ name: 'background-image', exclude: /none/g }];
 
@@ -157,12 +158,17 @@ export default class PollImporter {
           result.filename = `${path}.docx`;
         });
       } else {
-        const out = await WebImporter.html2md(
+        const components = await loadComponents(this.config);
+        const out = await WebImporter.html2jcr(
           url,
           documentClone,
           this.projectTransform,
-          params,
+          {
+            components,
+            ...params,
+          },
         );
+        out.url = params.originalURL;
         results = Array.isArray(out) ? out : [out];
       }
 
@@ -190,12 +196,14 @@ export default class PollImporter {
     document,
     includeDocx = false,
     params,
+    createJCR = false,
   }) {
     this.transformation = {
       url,
       document,
       includeDocx,
       params,
+      createJCR,
     };
   }
 
